@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Piezo</title>
+</head>
+<body style="font-family: sans-serif; padding: 16px;">
+
+<h2>Giám sát gạch Piezo</h2>
+<button id="nutKetNoi">Kết nối ESP32-S3</button>
+<button id="nutDat">Đặt lại</button>
+<span id="trangthai">Chưa kết nối</span>
+
+<h3>Số liệu</h3>
+<table border="1" cellpadding="6">
+  <tr><td>Điện áp BUS (GPIO4)</td><td><b id="vBus">-</b> V</td></tr>
+  <tr><td>Điện áp GPIO5</td><td><b id="vAux">-</b> V</td></tr>
+  <tr><td>Năng lượng trong tụ</td><td><b id="nangLuong">-</b> mJ</td></tr>
+  <tr><td>Công suất nạp (TB 1 giây)</td><td><b id="congSuat">-</b> mW</td></tr>
+  <tr><td>Tổng năng lượng thu được</td><td><b id="tong">-</b> mJ</td></tr>
+  <tr><td>Điện áp đỉnh</td><td><b id="dinh">-</b> V</td></tr>
+</table>
+
+<h3>Thông số</h3>
+<p>Hệ số phân áp GPIO4: <input id="heSo4" type="number" step="0.001" value="11"></p>
+<p>Hệ số phân áp GPIO5: <input id="heSo5" type="number" step="0.001" value="11"></p>
+<p>Tổng điện dung C (F): <input id="cTong" type="number" step="0.0001" value="0.1011"></p>
+<p>Điện áp đồng hồ đo được (V): <input id="vThat" type="number" step="0.001">
+   <button id="nutHieuChuan">Hiệu chuẩn GPIO4</button></p>
+
+<script>
+// DÁN địa chỉ Apps Script (kết thúc bằng /exec) vào đây:
+const URL_APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycbzxi0f3VmOd7U2kxDv_SzdhoUL8M3PcSJ1qKHl0PyfQbLzLwd1RmbGezTZr0Tnk1CMcvA/exec';
+let lanGuiCuoi = 0;
+
+const $ = id => document.getElementById(id);
+let cong, dangDoc = false;
+let diem = [];
+let tongThu = 0, vDinh = 0, eTruoc = null, mvMoiNhat = 0;
+
+async function ketNoi() {
+  try {
+    cong = await navigator.serial.requestPort();
+    await cong.open({ baudRate: 115200 });
+    $('trangthai').textContent = 'Đang nhận dữ liệu';
+    dangDoc = true;
+    docVongLap();
+  } catch (e) { $('trangthai').textContent = 'Lỗi: ' + e.message + ' (dùng Chrome hoặc Edge)'; }
+}
+
+async function docVongLap() {
+  const dec = new TextDecoderStream();
+  cong.readable.pipeTo(dec.writable);
+  const reader = dec.readable.getReader();
+  let bo = '';
+  while (dangDoc) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    bo += value;
+    let i;
+    while ((i = bo.indexOf('\n')) >= 0) {
+      xuLyDong(bo.slice(0, i).trim());
+      bo = bo.slice(i + 1);
+    }
+  }
+}
+
+function xuLyDong(dong) {
+  const p = dong.split(',');
+  if (p[0] !== 'DATA' || p.length !== 4) return;
+  const t = +p[1] / 1000, mv4 = +p[2], mv5 = +p[3];
+  if ([t, mv4, mv5].some(isNaN)) return;
+  mvMoiNhat = mv4;
+
+  const vBus = mv4 / 1000 * +$('heSo4').value;
+  const vAux = mv5 / 1000 * +$('heSo5').value;
+  const E = 0.5 * +$('cTong').value * vBus * vBus;     // Joule
+
+  if (eTruoc !== null && E > eTruoc) tongThu += E - eTruoc;
+  eTruoc = E;
+  vDinh = Math.max(vDinh, vBus);
+
+  diem.push({ t, E });
+  while (diem.length && t - diem[0].t > 1) diem.shift();   // giữ lại 1 giây gần nhất
+  const dt = t - diem[0].t;
+const congSuat = dt > 0.2 ? (E - diem[0].E) / dt : 0;
+
+
+  $('vBus').textContent = vBus.toFixed(3);
+  $('vAux').textContent = vAux.toFixed(3);
+  $('nangLuong').textContent = (E * 1000).toFixed(3);
+  $('congSuat').textContent = (congSuat * 1000).toFixed(3);
+  $('tong').textContent = (tongThu * 1000).toFixed(3);
+  $('dinh').textContent = vDinh.toFixed(3);
+
+  // Gửi số liệu lên Google Apps Script, tối đa 1 lần mỗi 2 giây
+  if (Date.now() - lanGuiCuoi > 2000) {
+    lanGuiCuoi = Date.now();
+    fetch(URL_APPS_SCRIPT, {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify({ vBus, vAux, nangLuong: E * 1000, congSuat: congSuat * 1000, tong: tongThu * 1000, dinh: vDinh })
+    }).catch(() => {});
+  }
+}
+
+function hieuChuan() {
+  const vThat = +$('vThat').value;
+  const vDo = mvMoiNhat / 1000 * +$('heSo4').value;
+  if (!(vThat > 0) || !(vDo > 0)) { $('trangthai').textContent = 'Cần nhập điện áp đồng hồ và đang có dữ liệu'; return; }
+  $('heSo4').value = (+$('heSo4').value * vThat / vDo).toFixed(4);
+}
+
+function datLai() { diem = []; tongThu = 0; vDinh = 0; eTruoc = null; }
+
+$('nutKetNoi').onclick = ketNoi;
+$('nutDat').onclick = datLai;
+$('nutHieuChuan').onclick = hieuChuan;
+</script>
+</body>
+</html>

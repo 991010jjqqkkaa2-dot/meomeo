@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xem số liệu Piezo</title>
+</head>
+<body style="font-family: sans-serif; padding: 16px;">
+
+<h2>Số liệu Piezo (xem từ xa)</h2>
+<p id="trangthai">Đang chờ dữ liệu...</p>
+
+<table border="1" cellpadding="6">
+  <tr><td>Điện áp BUS (GPIO4)</td><td><b id="vBus">-</b> V</td></tr>
+  <tr><td>Điện áp GPIO5</td><td><b id="vAux">-</b> V</td></tr>
+  <tr><td>Năng lượng trong tụ</td><td><b id="nangLuong">-</b> mJ</td></tr>
+  <tr><td>Công suất nạp (TB 1 giây)</td><td><b id="congSuat">-</b> mW</td></tr>
+  <tr><td>Tổng năng lượng thu được</td><td><b id="tong">-</b> mJ</td></tr>
+  <tr><td>Điện áp đỉnh</td><td><b id="dinh">-</b> V</td></tr>
+</table>
+
+<script>
+// DÁN địa chỉ Apps Script (kết thúc bằng /exec) vào đây:
+const URL_APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycbzxi0f3VmOd7U2kxDv_SzdhoUL8M3PcSJ1qKHl0PyfQbLzLwd1RmbGezTZr0Tnk1CMcvA/exec';
+
+const $ = id => document.getElementById(id);
+
+async function capNhat() {
+  try {
+    const d = await (await fetch(URL_APPS_SCRIPT)).json();
+    if (d.tuoi === null || d.tuoi === undefined) { $('trangthai').textContent = 'Server chưa nhận được dữ liệu nào'; return; }
+    for (const k of ['vBus', 'vAux', 'nangLuong', 'congSuat', 'tong', 'dinh']) {
+      $(k).textContent = d[k].toFixed(3);
+    }
+    $('trangthai').textContent = d.tuoi < 6 ? 'Đang cập nhật' : 'Dữ liệu cũ ' + d.tuoi.toFixed(0) + ' giây (trang gửi đã dừng?)';
+  } catch (e) { $('trangthai').textContent = 'Không kết nối được server'; }
+}
+
+setInterval(capNhat, 2000);   // hỏi Apps Script mỗi 2 giây
+capNhat();
+</script>
+</body>
+</html>
